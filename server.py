@@ -2,7 +2,7 @@ from flask import Flask, jsonify
 import requests
 from dotenv import load_dotenv
 import os
-import amadeus
+
 
 load_dotenv()
 
@@ -14,7 +14,8 @@ def home():
 
 @app.route('/api-status')
 def get_status():
-    amadeus.get_api_token()
+    pass
+    
                              
 
 
