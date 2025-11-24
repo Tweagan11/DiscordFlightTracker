@@ -26,8 +26,5 @@ def get_flights(departure="SLC", arrival="HND", outbound_date="2026-03-07", retu
     search = GoogleSearch(params)
     results = search.get_dict()
     
-    return results
-
-if __name__ == "__main__":
     with open("flights.json","w") as f:
-        json.dump(get_flights(), f, indent=4)
+        json.dump(results, f, indent=4)

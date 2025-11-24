@@ -1,9 +1,10 @@
 import os
 import json
-from discord import send_discord_message
+from discord_channel import send_discord_message
 from serp import get_flights
 from dotenv import load_dotenv
-import math
+from datetime import datetime, timezone
+from discord_webhook import DiscordEmbed
 load_dotenv()
 
 CACHE_FILE = "flights.json" 
@@ -16,135 +17,119 @@ def load_flights():
     with open(CACHE_FILE, "r") as f:
         return json.load(f)
     
+def parse_duration(minutes):
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m"
+
+def format_datetime(dt_string):
+    dt = datetime.fromisoformat(dt_string.replace('Z', '+00:00'))
+    return dt.strftime("%b %d, %I:%M %p")
+
+def get_price_status(flight_data):
     
-def pick_top_flights(flights_json, top_n=3):
-    if "best_flight" in flights_json:
-        flights = [flights_json["best_flight"]]
-        return flights
-        
+    price_insights = flight_data.get('price_insights', {})
+    lowest_price = price_insights.get('lowest_price', 0)
+    price_level = price_insights.get('price_level', 'typical')
+    typical_range = price_insights.get('typical_price_range', [0, 0])
+    
+    if price_level == 'low' or lowest_price < typical_range[0]:
+        return "Below Average", 0x00ff00 
+    elif price_level == 'high' or lowest_price > typical_range[1]:
+        return "Above Average", 0xff0000
     else:
-        flights = flights_json["other_flights"]
+        return "Typical Price", 0x0099ff 
 
-        # Sort by price ascending
-        sorted_flights = sorted(flights, key=lambda f: f["price"])
 
-        return sorted_flights[:top_n]
-   
-def compute_price_range(data):
-
-    insights = data.get("price_insights", {})
-    typical_range = insights.get("typical_price_range")
-    if typical_range and len(typical_range) == 2:
-        low, high = typical_range
-        avg = (low + high) / 2.0
-        return int(low), int(high), float(avg)
+def create_flight_embed(flight_data, top_n=3):
+    """Create a Discord embed with top N flights"""
     
-    prices = [f.get("price") for f in data.get("other_flights", []) if isinstance(f.get("price"), (int, float))]
-    if prices:
-        low = int(min(prices))
-        high = int(max(prices))
-        avg = sum(prices) / len(prices)
-        return low, high, float(avg)
-    return None, None, None 
-
-def duration_to_str(duration_minutes):
-    hours = duration_minutes // 60
-    minutes = duration_minutes % 60
-    return f"{hours}h {minutes}m"
-
-
-def format_embed(low, high, avg, top3):
-    description = ""
+    # Sort flights by price, then by duration
+    sorted_flights = sorted(
+        flight_data['other_flights'],
+        key=lambda x: (x['price'], x['total_duration'])
+    )[:top_n]
     
-    if low is not None:
-        description = f"**Typical price range:** ${low} — ${high}  •  **Avg:** ${math.floor(avg)}"
-    else:
-        description = "Price range not available"
+    # Get price status
+    price_status, embed_color = get_price_status(flight_data)
+    
+    # Get route info
+    airports = flight_data['airports'][0]
+    departure_info = airports['departure'][0]
+    arrival_info = airports['arrival'][0]
+    
+    # Create main embed
+    embed = DiscordEmbed(
+        title=f"✈️ Flights: {departure_info['city']} → {arrival_info['city']}",
+        description=f"**Price Status:** {price_status}\n**Lowest Price:** ${flight_data['price_insights']['lowest_price']}\n**Typical Range:** ${flight_data['price_insights']['typical_price_range'][0]} - ${flight_data['price_insights']['typical_price_range'][1]}",
+        color=embed_color
+    )
+    embed.set_timestamp(datetime.now(timezone.utc))
+    
+    # Add each flight as a field
+    for idx, flight in enumerate(sorted_flights, 1):
+        # Get flight segments info
+        segments = flight['flights']
+        first_segment = segments[0]
+        last_segment = segments[-1]
         
-    embed = {
-        "title": "Cheapest Flight Deals Today",
-        "description": "Here are the top 3 cheapest flights right now!",
-        "color": 0x1E90FF,
-        "fields": [],
-        "footer": {
-            "text": "Updated automatically every morning at 8 AM MT"
-        }
-    }
-
-    for idx, item in enumerate(top3, start=1):
-        price = item.get("price", "N/A")
-        # flights is an array of legs — use first leg for origin and last leg for destination
-        legs = item.get("flights", [])
-        if legs:
-            origin = legs[0]["departure_airport"].get("id", legs[0]["departure_airport"].get("name", ""))
-            dest = legs[-1]["arrival_airport"].get("id", legs[-1]["arrival_airport"].get("name", ""))
-            # start / end times (take first departure time and last arrival time if available)
-            dep_time = legs[0]["departure_airport"].get("time", "")
-            arr_time = legs[-1]["arrival_airport"].get("time", "")
-        else:
-            origin = item.get("origin", "N/A")
-            dest = item.get("destination", "N/A")
-            dep_time = arr_time = ""
-
-        total_duration = item.get("total_duration") or sum(leg.get("duration", 0) for leg in legs)
-        airline_logo = item.get("airline_logo")
-        airline = None
-        # try to pick airline from first leg where available
-        if legs:
-            airline = legs[0].get("airline") or item.get("airline")
-        if not airline:
-            airline = "Multiple airlines"
-
-        # small summary for field value
-        value_lines = [
-            f"**Price:** ${price}",
-            f"**Airline:** {airline}",
-            f"**Route:** {origin} → {dest}",
-            f"**Total duration:** {duration_to_str(total_duration)}"
-        ]
-        # include first layover info if present
-        layovers = item.get("layovers") or []
-        if layovers:
-            # show number of stops and if overnight
-            stops = len(layovers)
-            overnight = any(lp.get("overnight") for lp in layovers)
-            lo = f"{stops} stop{'s' if stops != 1 else ''}"
-            if overnight:
-                lo += " (overnight)"
-            value_lines.append(f"**Stops:** {lo}")
-
-        # include carbon emissions summary if present
-        ce = item.get("carbon_emissions")
-        if ce and isinstance(ce, dict):
-            diff = ce.get("difference_percent")
-            if diff is not None:
-                # show simple emoji
-                emo = "🔺" if diff > 10 else ("🔻" if diff < -10 else "⚖️")
-                value_lines.append(f"**Emissions vs typical:** {diff}% {emo}")
-
-        # include a short 'details' link — we point to frontend; you can expand to link to a per-flight page
-        value_lines.append(f"[View more on site]({FRONTEND_URL})")
-
-        field = {
-            "name": f"{idx}. {airline} — {origin} → {dest}  —  ${price}",
-            "value": "\n".join(value_lines),
-            "inline": False
-        }
-        embed["fields"].append(field)
-
-        # use the first airline logo as embed thumbnail (only set once)
-        if airline_logo and "thumbnail" not in embed:
-            embed["thumbnail"] = {"url": airline_logo}
-
+        # Build airlines list (unique)
+        airlines = list(set([seg['airline'] for seg in segments]))
+        airline_str = ", ".join(airlines)
+        
+        # Format departure and arrival
+        dep_time = format_datetime(first_segment['departure_airport']['time'])
+        arr_time = format_datetime(last_segment['arrival_airport']['time'])
+        
+        # Build flight legs information with durations
+        flight_legs = []
+        for i, segment in enumerate(segments):
+            leg_duration = parse_duration(segment['duration'])
+            dep_airport = segment['departure_airport']['id']
+            arr_airport = segment['arrival_airport']['id']
+            flight_legs.append(f"  ✈️ {dep_airport} → {arr_airport}: {leg_duration}")
+            
+            # Add layover info after this segment if there is one
+            if i < len(segments) - 1 and flight.get('layovers'):
+                layover = flight['layovers'][i]
+                layover_duration = parse_duration(layover['duration'])
+                overnight = " 🌙" if layover.get('overnight') else ""
+                flight_legs.append(f"     ⏱️ Layover: {layover_duration}{overnight}")
+        
+        flight_legs_str = "\n".join(flight_legs)
+        
+        # Get the booking link from Google Flights
+        google_flights_url = flight_data['search_metadata'].get('google_flights_url', '')
+        
+        # Build the field value
+        field_value = (
+            f"**Price:** ${flight['price']}\n"
+            f"**Total Duration:** {parse_duration(flight['total_duration'])}\n"
+            f"**Airlines:** {airline_str}\n"
+            f"**Departure:** {dep_time}\n"
+            f"**Arrival:** {arr_time}\n"
+            f"**Stops:** {len(flight.get('layovers', []))}\n\n"
+            f"**Flight Route:**\n{flight_legs_str}\n\n"
+            f"[View on Google Flights]({google_flights_url})"
+        )
+        
+        embed.add_embed_field(
+            name=f"💺 Option {idx}",
+            value=field_value,
+            inline=False
+        )
+    
+    # Add footer
+    embed.set_footer(text=f"Showing top {len(sorted_flights)} flights • Data from Google Flights")
+    
     return embed
     
 
 def main():
     get_flights()  # refresh cache
     data = load_flights()
-    low, high, avg = compute_price_range(data)
-    top3 = pick_top_flights(data, top_n=3)
-    embed = format_embed(low, high, avg, top3)
+    embed = create_flight_embed(data, top_n=3)
+    print(embed)
     resp = send_discord_message(WEBHOOK_URL, embed)
     print("Sent webhook, status:", resp.status_code)
 
