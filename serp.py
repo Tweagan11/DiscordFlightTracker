@@ -7,7 +7,7 @@ load_dotenv()
 
 def get_flights(departure="SLC", arrival="HND", outbound_date="2026-03-07", return_date="2026-03-22"):
     params = {
-        "api_key": os.getenv("API-KEY"),
+        "api_key": os.getenv("API_KEY"),
         "engine": "google_flights",
         "show_hidden": "true",
         "deep_search": "true",
