@@ -18,6 +18,6 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run script
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           API_KEY: ${{ secrets.API_KEY }}
         run: python bot.py
