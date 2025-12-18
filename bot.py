@@ -9,7 +9,7 @@ load_dotenv()
 
 CACHE_FILE = "flights.json" 
 FRONTEND_URL = "http://localhost:8080"
-WEBHOOK_URL = os.environ["GEN_WEBHOOK"]
+WEBHOOK_URL = os.environ["DISCORD_WEBHOOK"]
 
 
 
