@@ -9,7 +9,7 @@ load_dotenv()
 
 CACHE_FILE = "flights.json" 
 FRONTEND_URL = "http://localhost:8080"
-WEBHOOK_URL = os.environ["DISCORD_WEBHOOK"]
+WEBHOOK_URL = os.environ["GEN_WEBHOOK"]
 
 
 
@@ -41,15 +41,30 @@ def get_price_status(flight_data):
         return "Typical Price", 0x0099ff 
 
 
-def create_flight_embed(flight_data, top_n=3):
+def create_flight_embed(flight_data, top_n=3, message=""):
     """Create a Discord embed with top N flights"""
     
     # Sort flights by price, then by duration
+    
+    delta_flights = [f for f in flight_data['other_flights'] if f['flights'][0]['airline'] == 'Delta']
+    
+    # print(delta_flights[0])
+    
     sorted_flights = sorted(
         flight_data['other_flights'],
         key=lambda x: (x['price'], x['total_duration'])
     )[:top_n]
     
+    sorted_flights += flight_data.get('best_flight', [])
+    sorted_flights = sorted(
+        sorted_flights,
+        key=lambda x: (x['price'], x['total_duration'])
+    )[:top_n]
+    
+    min_delta = min(delta_flights, key=lambda x: x['price'])
+    sorted_flights += [min_delta]
+    
+    print(sorted_flights)
     # Get price status
     price_status, embed_color = get_price_status(flight_data)
     
@@ -60,14 +75,15 @@ def create_flight_embed(flight_data, top_n=3):
     
     # Create main embed
     embed = DiscordEmbed(
-        title=f"✈️ Flights: {departure_info['city']} → {arrival_info['city']}",
-        description=f"**Price Status:** {price_status}\n**Lowest Price:** ${flight_data['price_insights']['lowest_price']}\n**Typical Range:** ${flight_data['price_insights']['typical_price_range'][0]} - ${flight_data['price_insights']['typical_price_range'][1]}",
+        title=f"✈️ Flights: {departure_info['city']} → {arrival_info['city']} for {message}",
+        description=f"**Price Status:** {price_status}\n**Lowest Price:** ${flight_data['price_insights']['lowest_price']}\n**Typical Range:** ${flight_data['price_insights']['typical_price_range'][0]} - ${flight_data['price_insights']['typical_price_range'][1]}" if flight_data.get('price_insights') else "",
         color=embed_color
     )
     embed.set_timestamp(datetime.now(timezone.utc))
     
     # Add each flight as a field
     for idx, flight in enumerate(sorted_flights, 1):
+        
         # Get flight segments info
         segments = flight['flights']
         first_segment = segments[0]
@@ -126,10 +142,17 @@ def create_flight_embed(flight_data, top_n=3):
     
 
 def main():
-    get_flights()  # refresh cache
+    get_flights(outbound_date="2026-03-07", outbound_times="0,23")  # refresh cache
     data = load_flights()
-    embed = create_flight_embed(data, top_n=3)
-    print(embed)
+    embed = create_flight_embed(data, top_n=1, message="for March 7th Departures")
+    # print(embed)
+    resp = send_discord_message(WEBHOOK_URL, embed)
+    print("Sent webhook, status:", resp.status_code)
+    
+    get_flights()
+    data = load_flights()
+    embed = create_flight_embed(data, top_n=1, message="for March 6th Evening Departures")
+    # print(embed)
     resp = send_discord_message(WEBHOOK_URL, embed)
     print("Sent webhook, status:", resp.status_code)
 

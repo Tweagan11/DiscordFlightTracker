@@ -5,7 +5,7 @@ import json
 
 load_dotenv()
 
-def get_flights(departure="SLC", arrival="HND", outbound_date="2026-03-07", return_date="2026-03-22"):
+def get_flights(departure="SLC", arrival="HND", outbound_date="2026-03-06", return_date="2026-03-22", outbound_times="17,23"):
     params = {
         "api_key": os.getenv("API_KEY"),
         "engine": "google_flights",
@@ -18,6 +18,7 @@ def get_flights(departure="SLC", arrival="HND", outbound_date="2026-03-07", retu
         "gl": "us",
         "currency": "USD",
         "outbound_date": outbound_date,
+        "outbound_times": outbound_times,
         "return_date": return_date,
         "travel_class": "1",
         "sort_by": "2"
